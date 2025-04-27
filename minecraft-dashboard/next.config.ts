@@ -12,10 +12,7 @@ const nextConfig: NextConfig = {
     domains: ["lh3.googleusercontent.com"], // For Google profile images
     unoptimized: true,
   },
-  // Add this to support Server-Sent Events
-  experimental: {
-    serverComponentsExternalPackages: ["fs", "path", "stream"],
-  },
+  serverExternalPackages: ["fs", "path", "stream"],
 }
 
 export default nextConfig
