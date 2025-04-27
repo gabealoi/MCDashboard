@@ -33,7 +33,8 @@ export async function GET() {
     const headers = {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
-      Connection: "keep-alive",
+      "Connection": "keep-alive",
+      "Transfer-Encoding":"chunked"
     }
 
     // Create a transform stream to filter for [INFO] lines
