@@ -36,6 +36,10 @@ jobs:
             cd minecraft-dashboard
             docker push "${{ secrets.DOCKER_USERNAME }}"/mc-dash:latest
           
+      - name: Add server to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.SRV }} >> ~/.ssh/known_hosts
 
       # SSH into VPS and pull the latest Docker image, stop old container, and start the new one
       - name: Deploy container to SRV
