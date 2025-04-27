@@ -27,7 +27,7 @@ jobs:
 
       - name: Build application image
         run: |
-          docker build -t "${{ secrets.DOCKER_USERNAME }}"/mc-dash:latest -f Dockerfile .
+          docker build -t "${{ secrets.DOCKER_USERNAME }}"/mc-dash:latest -f mc-dash .
 
 
       - name: Push application image
