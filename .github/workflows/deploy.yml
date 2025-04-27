@@ -27,12 +27,14 @@ jobs:
 
       - name: Build application image
         run: |
-          docker build -t "${{ secrets.DOCKER_USERNAME }}"/mc-dash:latest -f mc-dash .
+            cd minecraft-dashboard
+            docker build -t "${{ secrets.DOCKER_USERNAME }}"/mc-dash:latest -f Dockerfile .
 
 
       - name: Push application image
         run: |
-          docker push "${{ secrets.DOCKER_USERNAME }}"/mc-dash:latest
+            cd minecraft-dashboard
+            docker push "${{ secrets.DOCKER_USERNAME }}"/mc-dash:latest
           
 
       # SSH into VPS and pull the latest Docker image, stop old container, and start the new one
