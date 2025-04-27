@@ -53,7 +53,7 @@ export async function GET() {
           console.log(`Total lines in file: ${allLines.length}`)
 
           // Filter for INFO lines
-          const infoLines = allLines.filter((line) => line.includes("[Server thread/INFO]"))
+          const infoLines = allLines.filter((line) => line.includes("/INFO]"))
           console.log(`INFO lines found: ${infoLines.length}`)
 
           // Send each line as a separate SSE event
@@ -88,7 +88,7 @@ export async function GET() {
                 const lines = content.split("\n")
 
                 // Filter for INFO lines
-                const infoLines = lines.filter((line) => line.includes("[Server thread/INFO]"))
+                const infoLines = lines.filter((line) => line.includes("/INFO]"))
 
                 if (infoLines.length > 0) {
                   console.log(`Sending ${infoLines.length} new log lines`)
