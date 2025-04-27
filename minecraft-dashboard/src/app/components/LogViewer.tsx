@@ -21,7 +21,7 @@ import VerticalAlignBottomIcon from "@mui/icons-material/VerticalAlignBottom"
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore"
 import DownloadIcon from "@mui/icons-material/Download"
 import Link from "next/link"
-
+    
 export default function LogViewer() {
     const [logs, setLogs] = useState<string[]>([])
     const [isLoading, setIsLoading] = useState(true)
