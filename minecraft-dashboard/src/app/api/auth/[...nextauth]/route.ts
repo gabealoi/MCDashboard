@@ -10,7 +10,7 @@ export const authOptions: NextAuthOptions = {
     }),
   ],
   session: {
-    maxAge: 6 * 60 * 60, // 6 hours
+    maxAge: 6 * 60 * 20, // 3 hours
     strategy: "jwt" as const, // Properly typed as a const
   },
   callbacks: {
@@ -34,6 +34,17 @@ export const authOptions: NextAuthOptions = {
     error: "/login",
   },
   secret: process.env.NEXTAUTH_SECRET,
+  cookies: {
+    sessionToken: {
+      name: `next-auth.session-token`,
+      options: {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production", // Ensures cookie is sent only over HTTPS in production
+        sameSite: "lax", // Can also be "strict" or "none"
+        path: "/",
+      },
+    },
+  },
 }
 
 const handler = NextAuth(authOptions)

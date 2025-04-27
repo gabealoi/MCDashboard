@@ -81,7 +81,7 @@ export default function DashboardContent({ user }: DashboardContentProps) {
 
         <Box sx={{ flexGrow: 1 }}>
           <Grid container spacing={3}>
-            <Grid size={{xs:12, md:6}}>
+            <Grid size={{ xs: 12, md: 6 }}>
               <Card sx={{ height: "100%" }}>
                 <CardContent>
                   <Typography variant="h6" gutterBottom>
@@ -104,7 +104,7 @@ export default function DashboardContent({ user }: DashboardContentProps) {
               </Card>
             </Grid>
 
-            <Grid size={{xs:12, md:6}}>
+            <Grid size={{ xs: 12, md: 6 }}>
               <Card sx={{ height: "100%" }}>
                 <CardContent>
                   <Typography variant="h6" gutterBottom>
