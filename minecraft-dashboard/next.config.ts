@@ -9,10 +9,13 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   images: {
-    domains: ["lh3.googleusercontent.com"], // For Google profile images
+    domains: ["lh3.googleusercontent.com"],
     unoptimized: true,
   },
   serverExternalPackages: ["fs", "path", "stream"],
+
+  // Optional but useful for Docker/custom server setups
+  output: "standalone",
 }
 
 export default nextConfig

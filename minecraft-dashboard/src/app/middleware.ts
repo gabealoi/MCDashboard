@@ -20,5 +20,10 @@ export async function middleware(request: NextRequest) {
 
 // Add the paths that should be protected by authentication
 export const config = {
-  matcher: ["/dashboard/:path*", "/api/server/:path*"],
+  matcher: [
+    "/((?!api/auth|login|_next|favicon.ico).*)",
+  ],
 }
+// export const config = {
+//   matcher: ["/dashboard/:path*", "/api/server/:path*"],
+// }
