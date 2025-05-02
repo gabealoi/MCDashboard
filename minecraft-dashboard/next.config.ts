@@ -14,8 +14,6 @@ const nextConfig: NextConfig = {
   },
   serverExternalPackages: ["fs", "path", "stream"],
 
-  // Optional but useful for Docker/custom server setups
-  output: "standalone",
 }
 
 export default nextConfig
