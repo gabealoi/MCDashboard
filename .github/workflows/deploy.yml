@@ -39,7 +39,7 @@ jobs:
       # SSH into VPS and pull the latest Docker image, stop old container, and start the new one
       - name: Deploy container to SRV
         run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.SRV_USER }}@${{ secrets.SRV }} << 'EOF'
+          ssh -o StrictHostKeyChecking=no -p ${{ secrets.SRV_PORT }} ${{ secrets.SRV_USER }}@${{ secrets.SRV }} << 'EOF'
       
             docker pull "${{ secrets.DOCKER_USERNAME }}"/mc-dash:latest
 
