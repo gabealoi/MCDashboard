@@ -116,8 +116,8 @@ export default function LogViewer() {
             // Handle errors
             eventSource.onerror = (err) => {
                 console.error("EventSource error:", err)
-                setError("Connection to log stream failed. Attempting to reconnect...")
-                setConnectionStatus("Reconnecting...")
+                // setError("Connection to log stream failed. Attempting to reconnect...")
+                // setConnectionStatus("Reconnecting...")
                 setIsLoading(true)
 
                 // Close the current connection
