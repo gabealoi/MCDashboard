@@ -36,6 +36,7 @@ export async function GET() {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       "Connection": "keep-alive",
+      "Content-Encoding": "identity",
     }
 
     // Create a transform stream
@@ -110,9 +111,16 @@ export async function GET() {
             }
           }, 1000) // Poll every second
 
+
+          const keepAliveId = setInterval(() => {
+            controller.enqueue(encoder.encode(`: keep-alive\n\n`))
+          }, 25000) // 25 seconds
+          
+
           // Clean up when the connection closes
           return () => {
             clearInterval(intervalId)
+            clearInterval(keepAliveId)
           }
         } catch (error) {
           console.error("Error in stream start:", error)
