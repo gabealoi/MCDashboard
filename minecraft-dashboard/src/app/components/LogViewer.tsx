@@ -343,7 +343,7 @@ export default function LogViewer() {
                         }}
                     >
                         {logs.length > 0 ? (
-                            logs.map((log, index) => <div key={index}>{log}</div>)
+                            logs.map((log, index) => <div key={index}>{log.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>) // making sure we escape unsafe log content
                         ) : !isLoading ? (
                             <Typography color="#888" sx={{ p: 2 }}>
                                 {error ? "No logs available due to an error." : "Waiting for log entries..."}
