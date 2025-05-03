@@ -13,6 +13,7 @@ import {
     Accordion,
     AccordionSummary,
     AccordionDetails,
+    Alert,
 } from "@mui/material"
 import HomeIcon from "@mui/icons-material/Home"
 import ArrowBackIcon from "@mui/icons-material/ArrowBack"
@@ -21,7 +22,7 @@ import VerticalAlignBottomIcon from "@mui/icons-material/VerticalAlignBottom"
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore"
 import DownloadIcon from "@mui/icons-material/Download"
 import Link from "next/link"
-    
+
 export default function LogViewer() {
     const [logs, setLogs] = useState<string[]>([])
     const [isLoading, setIsLoading] = useState(true)
@@ -29,8 +30,14 @@ export default function LogViewer() {
     const [connectionStatus, setConnectionStatus] = useState<string>("Connecting...")
     const [autoScroll, setAutoScroll] = useState(true)
     const [isDownloading, setIsDownloading] = useState(false)
+    const [notification, setNotification] = useState({
+        show: false,
+        message: "",
+        severity: "info" as "info" | "error" | "success",
+    })
     const logContainerRef = useRef<HTMLDivElement>(null)
     const eventSourceRef = useRef<EventSource | null>(null)
+    const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
     // Function to connect to the log stream
     const connectToLogStream = () => {
@@ -41,6 +48,11 @@ export default function LogViewer() {
         // Close any existing connection
         if (eventSourceRef.current) {
             eventSourceRef.current.close()
+        }
+
+        // Clear any pending reconnection
+        if (reconnectTimeoutRef.current) {
+            clearTimeout(reconnectTimeoutRef.current)
         }
 
         try {
@@ -54,7 +66,7 @@ export default function LogViewer() {
                 setIsLoading(false)
 
                 // Log the raw data for debugging
-                console.log("Received event data:", event.data)
+                // console.log("Received event data:", event.data)
 
                 if (!event.data || event.data.trim() === "") {
                     console.log("Received empty data")
@@ -62,18 +74,28 @@ export default function LogViewer() {
                 }
 
                 // Check if the data is a system message
-                if (event.data.includes("No log lines found") || event.data.includes("Error")) {
-                    setError(event.data)
+                if (event.data.includes("Error") || event.data.includes("Waiting")) {
+                    setNotification({
+                        show: true,
+                        message: event.data,
+                        severity: event.data.includes("Error") ? "error" : "info",
+                    })
                     return
                 }
 
                 // Add the new log line to our state
                 setLogs((prevLogs) => {
-                    // Check if this log is already in our list
+                    // Check if this log is already in our list to avoid duplicates
                     if (prevLogs.includes(event.data)) {
                         return prevLogs
                     }
-                    return [...prevLogs, event.data]
+
+                    // Keep only the last 1000 log entries to prevent memory issues
+                    const newLogs = [...prevLogs, event.data]
+                    if (newLogs.length > 1000) {
+                        return newLogs.slice(newLogs.length - 1000)
+                    }
+                    return newLogs
                 })
 
                 setConnectionStatus("Connected - receiving logs")
@@ -84,21 +106,40 @@ export default function LogViewer() {
                 setIsLoading(false)
                 setConnectionStatus("Connected to log stream")
                 console.log("Log stream connection opened")
+                setNotification({
+                    show: true,
+                    message: "Connected to log stream successfully",
+                    severity: "success",
+                })
             }
 
             // Handle errors
             eventSource.onerror = (err) => {
                 console.error("EventSource error:", err)
-                setError("Connection to log stream failed. Please try refreshing.")
-                setConnectionStatus("Disconnected - error occurred")
-                setIsLoading(false)
+                setError("Connection to log stream failed. Attempting to reconnect...")
+                setConnectionStatus("Reconnecting...")
+                setIsLoading(true)
+
+                // Close the current connection
                 eventSource.close()
+
+                // Set up reconnection after a delay
+                reconnectTimeoutRef.current = setTimeout(() => {
+                    console.log("Attempting to reconnect...")
+                    connectToLogStream()
+                }, 5000) // Try to reconnect after 5 seconds
             }
         } catch (err) {
             console.error("Error setting up log stream:", err)
             setError(`Failed to connect to log stream: ${err instanceof Error ? err.message : "Unknown error"}`)
             setConnectionStatus("Failed to connect")
             setIsLoading(false)
+
+            // Try to reconnect after a delay
+            reconnectTimeoutRef.current = setTimeout(() => {
+                console.log("Attempting to reconnect after error...")
+                connectToLogStream()
+            }, 5000)
         }
     }
 
@@ -110,6 +151,9 @@ export default function LogViewer() {
         return () => {
             if (eventSourceRef.current) {
                 eventSourceRef.current.close()
+            }
+            if (reconnectTimeoutRef.current) {
+                clearTimeout(reconnectTimeoutRef.current)
             }
         }
     }, [])
@@ -178,12 +222,26 @@ export default function LogViewer() {
             document.body.removeChild(a)
             URL.revokeObjectURL(url)
 
-            console.log("Logs downloaded successfully")
+            setNotification({
+                show: true,
+                message: "Logs downloaded successfully",
+                severity: "success",
+            })
         } catch (error) {
             console.error("Error downloading logs:", error)
+            setNotification({
+                show: true,
+                message: `Error downloading logs: ${error instanceof Error ? error.message : "Unknown error"}`,
+                severity: "error",
+            })
         } finally {
             setIsDownloading(false)
         }
+    }
+
+    // Close notification
+    const handleCloseNotification = () => {
+        setNotification({ ...notification, show: false })
     }
 
     return (
@@ -212,10 +270,26 @@ export default function LogViewer() {
                     <Typography variant="subtitle1" color="text.secondary">
                         Viewing filtered [Server thread/INFO] logs from the Minecraft server
                     </Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                    <Typography
+                        variant="body2"
+                        color={
+                            connectionStatus.includes("Connected")
+                                ? "success.main"
+                                : connectionStatus.includes("Failed")
+                                    ? "error.main"
+                                    : "text.secondary"
+                        }
+                        sx={{ mt: 1 }}
+                    >
                         Status: {connectionStatus}
                     </Typography>
                 </Paper>
+
+                {notification.show && (
+                    <Alert severity={notification.severity} onClose={handleCloseNotification} sx={{ mb: 3 }}>
+                        {notification.message}
+                    </Alert>
+                )}
 
                 <Paper elevation={3} sx={{ p: 2, mb: 3, position: "relative" }}>
                     <Box sx={{ display: "flex", justifyContent: "space-between", mb: 2 }}>
@@ -223,8 +297,6 @@ export default function LogViewer() {
                         <Box>
                             <Tooltip title="Download logs">
                                 <span>
-                                    {" "}
-                                    {/* Wrapper to handle disabled state with tooltip */}
                                     <IconButton onClick={downloadLogs} disabled={isDownloading || logs.length === 0} sx={{ mr: 1 }}>
                                         <DownloadIcon />
                                     </IconButton>
@@ -274,9 +346,7 @@ export default function LogViewer() {
                             logs.map((log, index) => <div key={index}>{log}</div>)
                         ) : !isLoading ? (
                             <Typography color="#888" sx={{ p: 2 }}>
-                                {error
-                                    ? "No logs available due to an error."
-                                    : "No logs available. The log file may be empty or not contain any [Server thread/INFO] lines."}
+                                {error ? "No logs available due to an error." : "Waiting for log entries..."}
                             </Typography>
                         ) : null}
                     </Box>

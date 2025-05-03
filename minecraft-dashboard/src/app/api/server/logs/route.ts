@@ -6,6 +6,9 @@ import type { Session } from "next-auth"
 // Path to the log file - update this to match your server's log file location
 const LOG_FILE_PATH = process.env.LOG_FILE_PATH || "latest.log"
 
+// Keep track of file positions for different clients
+const clientPositions = new Map<string, number>()
+
 export async function GET() {
   try {
     const session = (await getServerSession(authOptions)) as Session | null
@@ -25,93 +28,91 @@ export async function GET() {
       return new Response(`Log file not found: ${LOG_FILE_PATH}. Current directory: ${process.cwd()}`, { status: 404 })
     }
 
-    // Log file info for debugging
-    const stats = fs.statSync(LOG_FILE_PATH)
-    console.log(`Log file found: ${LOG_FILE_PATH}, size: ${stats.size} bytes, modified: ${stats.mtime}`)
+    // Generate a unique client ID based on the user's email
+    const clientId = session.user.email || "anonymous"
 
     // Set up Server-Sent Events headers
     const headers = {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
-      "Connection": "keep-alive",
-      "Transfer-Encoding":"chunked"
+      Connection: "keep-alive",
     }
 
-    // Create a transform stream to filter for [INFO] lines
+    // Create a transform stream
     const encoder = new TextEncoder()
 
     // Create a readable stream that will be sent to the client
     const readable = new ReadableStream({
       async start(controller) {
         try {
-          // Read the file content
-          const initialContent = fs.readFileSync(LOG_FILE_PATH, "utf-8")
+          // Get file stats
+          const stats = fs.statSync(LOG_FILE_PATH)
 
-          // Normalize line endings and split into lines
-          const normalizedContent = initialContent.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
-          const allLines = normalizedContent.split("\n")
+          // Get the current position for this client, or start at the end if it's a new connection
+          let position = clientPositions.get(clientId) || Math.max(0, stats.size - 50000) // Start with last ~50KB for new clients
 
-          console.log(`Total lines in file: ${allLines.length}`)
-
-          // Filter for INFO lines
-          const infoLines = allLines.filter((line) => line.includes("/INFO]"))
-          console.log(`INFO lines found: ${infoLines.length}`)
-
-          // Send each line as a separate SSE event
-          if (infoLines.length > 0) {
-            for (const line of infoLines) {
-              if (line.trim() !== "") {
-                // Escape any newlines within the line itself
-                const escapedLine = line.replace(/\n/g, "\\n")
-                controller.enqueue(encoder.encode(`data: ${escapedLine}\n\n`))
-              }
+          // Send initial data
+          const initialChunk = await readNewChunk(position)
+          if (initialChunk.lines.length > 0) {
+            for (const line of initialChunk.lines) {
+              controller.enqueue(encoder.encode(`data: ${line}\n\n`))
             }
-            console.log(`Sent ${infoLines.length} initial log lines as separate events`)
           } else {
-            controller.enqueue(encoder.encode(`data: No log lines found\n\n`))
-            console.log("No log lines found")
+            controller.enqueue(encoder.encode(`data: Waiting for new log entries...\n\n`))
           }
 
-          // Set up file watcher to stream updates
-          const watcher = fs.watch(LOG_FILE_PATH, (eventType) => {
-            if (eventType === "change") {
-              try {
-                // Read the last few lines of the file
-                const buffer = Buffer.alloc(4096) // Read last 4KB
-                const fd = fs.openSync(LOG_FILE_PATH, "r")
-                const fileStats = fs.fstatSync(fd)
-                const position = Math.max(0, fileStats.size - buffer.length)
+          // Update position
+          position = initialChunk.newPosition
+          clientPositions.set(clientId, position)
 
-                fs.readSync(fd, buffer, 0, buffer.length, position)
-                fs.closeSync(fd)
-
-                const content = buffer.toString().replace(/\r\n/g, "\n").replace(/\r/g, "\n")
-                const lines = content.split("\n")
-
-                // Filter for INFO lines
-                const infoLines = lines.filter((line) => line.includes("/INFO]"))
-
-                if (infoLines.length > 0) {
-                  console.log(`Sending ${infoLines.length} new log lines`)
-
-                  // Send each new line as a separate event
-                  for (const line of infoLines) {
-                    if (line.trim() !== "") {
-                      const escapedLine = line.replace(/\n/g, "\\n")
-                      controller.enqueue(encoder.encode(`data: ${escapedLine}\n\n`))
-                    }
-                  }
-                }
-              } catch (error) {
-                console.error("Error reading log file:", error)
-                controller.enqueue(encoder.encode(`data: Error reading log file: ${error}\n\n`))
+          // Set up polling for file changes
+          const intervalId = setInterval(async () => {
+            try {
+              // Check if file exists and get stats
+              if (!fs.existsSync(LOG_FILE_PATH)) {
+                controller.enqueue(
+                  encoder.encode(`data: Log file no longer exists. Waiting for it to be created...\n\n`),
+                )
+                return
               }
-            }
-          })
 
-          // Clean up the watcher when the connection closes
+              const currentStats = fs.statSync(LOG_FILE_PATH)
+
+              // If file size is smaller than our position, the file was rotated/truncated
+              if (currentStats.size < position) {
+                position = 0
+                controller.enqueue(
+                  encoder.encode(`data: Log file was rotated or truncated. Starting from beginning.\n\n`),
+                )
+              }
+
+              // If file hasn't changed, do nothing
+              if (currentStats.size <= position) {
+                return
+              }
+
+              // Read new content
+              const chunk = await readNewChunk(position)
+
+              // Send new lines
+              if (chunk.lines.length > 0) {
+                for (const line of chunk.lines) {
+                  controller.enqueue(encoder.encode(`data: ${line}\n\n`))
+                }
+
+                // Update position
+                position = chunk.newPosition
+                clientPositions.set(clientId, position)
+              }
+            } catch (error) {
+              console.error("Error polling log file:", error)
+              controller.enqueue(encoder.encode(`data: Error reading log file: ${error}\n\n`))
+            }
+          }, 1000) // Poll every second
+
+          // Clean up when the connection closes
           return () => {
-            watcher.close()
+            clearInterval(intervalId)
           }
         } catch (error) {
           console.error("Error in stream start:", error)
@@ -126,4 +127,46 @@ export async function GET() {
     console.error("Error streaming logs:", error)
     return new Response(`Error streaming logs: ${error.message}`, { status: 500 })
   }
+}
+
+// Helper function to read new content from the log file
+async function readNewChunk(position: number): Promise<{ lines: string[]; newPosition: number }> {
+  return new Promise((resolve, reject) => {
+    try {
+      // Open the file for reading
+      const fd = fs.openSync(LOG_FILE_PATH, "r")
+
+      // Get file stats
+      const stats = fs.fstatSync(fd)
+
+      // If there's nothing new to read
+      if (stats.size <= position) {
+        fs.closeSync(fd)
+        resolve({ lines: [], newPosition: position })
+        return
+      }
+
+      // Calculate how much to read
+      const bytesToRead = stats.size - position
+      const buffer = Buffer.alloc(bytesToRead)
+
+      // Read from the last position to the end
+      fs.readSync(fd, buffer, 0, bytesToRead, position)
+      fs.closeSync(fd)
+
+      // Convert buffer to string and normalize line endings
+      const content = buffer.toString().replace(/\r\n/g, "\n").replace(/\r/g, "\n")
+
+      // Split into lines and filter for INFO logs
+      const allLines = content.split("\n")
+      const infoLines = allLines.filter((line) => line.includes("/INFO]")).map((line) => line.replace(/\n/g, "\\n")) // Escape any newlines within the line
+
+      resolve({
+        lines: infoLines,
+        newPosition: position + bytesToRead,
+      })
+    } catch (error) {
+      reject(error)
+    }
+  })
 }
