@@ -40,7 +40,7 @@ export const authOptions: NextAuthOptions = {
       options: {
         httpOnly: true,
         secure: true, // Ensures cookie is sent only over HTTPS in production
-        sameSite: "lax", // Can also be "strict" or "none"
+        sameSite: "strict", // Can also be "strict" or "none"
         path: "/",
       },
     },
