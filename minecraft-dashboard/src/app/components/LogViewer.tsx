@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import {
     Container,
     Typography,
@@ -14,6 +14,11 @@ import {
     AccordionSummary,
     AccordionDetails,
     Alert,
+    Select,
+    MenuItem,
+    FormControl,
+    InputLabel,
+    type SelectChangeEvent,
 } from "@mui/material"
 import HomeIcon from "@mui/icons-material/Home"
 import ArrowBackIcon from "@mui/icons-material/ArrowBack"
@@ -23,8 +28,18 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore"
 import DownloadIcon from "@mui/icons-material/Download"
 import Link from "next/link"
 
+// Define log level type
+type LogLevel = "INFO" | "WARN" | "ERROR" | "ALL"
+
+// Define log entry type
+interface LogEntry {
+    level: LogLevel | string
+    content: string
+}
+
 export default function LogViewer() {
-    const [logs, setLogs] = useState<string[]>([])
+    const [logs, setLogs] = useState<LogEntry[]>([])
+    const [logLevel, setLogLevel] = useState<LogLevel>("INFO")
     const [isLoading, setIsLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
     const [connectionStatus, setConnectionStatus] = useState<string>("Connecting...")
@@ -35,38 +50,45 @@ export default function LogViewer() {
         message: "",
         severity: "info" as "info" | "error" | "success",
     })
+
     const logContainerRef = useRef<HTMLDivElement>(null)
     const eventSourceRef = useRef<EventSource | null>(null)
     const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+    const connectionIdRef = useRef<string>(`connection-${Date.now()}`)
 
-    // Function to connect to the log stream
-    const connectToLogStream = () => {
+    // Function to connect to the log stream - using useCallback to avoid recreating this function on every render
+    const connectToLogStream = useCallback(() => {
         setIsLoading(true)
         setError(null)
-        setConnectionStatus("Connecting to log stream...")
+        setConnectionStatus("Connecting...")
 
         // Close any existing connection
         if (eventSourceRef.current) {
+            console.log("Closing existing connection before creating a new one")
             eventSourceRef.current.close()
+            eventSourceRef.current = null
         }
 
         // Clear any pending reconnection
         if (reconnectTimeoutRef.current) {
             clearTimeout(reconnectTimeoutRef.current)
+            reconnectTimeoutRef.current = null
         }
 
+        // Generate a unique connection ID to avoid caching issues
+        connectionIdRef.current = `connection-${Date.now()}`
+
         try {
-            // Create a new EventSource connection
-            console.log("Connecting to log stream...")
-            const eventSource = new EventSource("/api/server/logs")
+            // Create a new EventSource connection with log level parameter and cache buster
+            const url = `/api/server/logs?level=${logLevel}&t=${Date.now()}`
+            console.log(`Connecting to log stream with URL: ${url}`)
+
+            const eventSource = new EventSource(url)
             eventSourceRef.current = eventSource
 
             // Handle incoming messages
             eventSource.onmessage = (event) => {
                 setIsLoading(false)
-
-                // Log the raw data for debugging
-                // console.log("Received event data:", event.data)
 
                 if (!event.data || event.data.trim() === "") {
                     console.log("Received empty data")
@@ -80,27 +102,37 @@ export default function LogViewer() {
                         message: event.data,
                         severity: event.data.includes("Error") ? "error" : "info",
                     })
-                
-                    setLogs((prevLogs) => [...prevLogs, event.data])
+
+                    // Add as a special system message
+                    setLogs((prevLogs) => [...prevLogs, { level: "SYSTEM", content: event.data }])
                     return
                 }
 
-                // Add the new log line to our state
-                setLogs((prevLogs) => {
-                    // Check if this log is already in our list to avoid duplicates
-                    if (prevLogs.includes(event.data)) {
-                        return prevLogs
-                    }
+                try {
+                    // Parse the JSON data from the server
+                    const logEntry: LogEntry = JSON.parse(event.data)
 
-                    // Keep only the last 1000 log entries to prevent memory issues
-                    const newLogs = [...prevLogs, event.data]
-                    if (newLogs.length > 1000) {
-                        return newLogs.slice(newLogs.length - 1000)
-                    }
-                    return newLogs
-                })
+                    // Add the new log entry to our state
+                    setLogs((prevLogs) => {
+                        // Check if this log is already in our list to avoid duplicates
+                        if (prevLogs.some((log) => log.content === logEntry.content)) {
+                            return prevLogs
+                        }
 
-                setConnectionStatus("Connected - receiving logs")
+                        // Keep only the last 1000 log entries to prevent memory issues
+                        const newLogs = [...prevLogs, logEntry]
+                        if (newLogs.length > 1000) {
+                            return newLogs.slice(newLogs.length - 1000)
+                        }
+                        return newLogs
+                    })
+
+                    setConnectionStatus("Connected - receiving logs")
+                } catch (error) {
+                    console.error("Error parsing log entry:", error, event.data)
+                    // If parsing fails, add as plain text
+                    setLogs((prevLogs) => [...prevLogs, { level: "UNKNOWN", content: event.data }])
+                }
             }
 
             // Handle connection open
@@ -118,12 +150,11 @@ export default function LogViewer() {
             // Handle errors
             eventSource.onerror = (err) => {
                 console.error("EventSource error:", err)
-                // setError("Connection to log stream failed. Attempting to reconnect...")
-                // setConnectionStatus("Reconnecting...")
                 setIsLoading(true)
 
                 // Close the current connection
                 eventSource.close()
+                eventSourceRef.current = null
 
                 // Set up reconnection after a delay
                 reconnectTimeoutRef.current = setTimeout(() => {
@@ -143,22 +174,34 @@ export default function LogViewer() {
                 connectToLogStream()
             }, 5000)
         }
-    }
+    }, [logLevel]) // Only recreate this function when logLevel changes
 
-    // Connect to the log stream when the component mounts
+    // Connect to the log stream when the component mounts or log level changes
     useEffect(() => {
-        connectToLogStream()
+        console.log(`Log level changed to: ${logLevel}, clearing logs and reconnecting`)
+        setLogs([]) // Clear logs when changing level
 
-        // Clean up the connection when the component unmounts
+        // Small delay before connecting to ensure any previous connection is fully closed
+        const timeoutId = setTimeout(() => {
+            connectToLogStream()
+        }, 100)
+
+        // Clean up the connection when the component unmounts or log level changes
         return () => {
+            clearTimeout(timeoutId)
+
             if (eventSourceRef.current) {
+                console.log("Cleaning up connection on unmount or log level change")
                 eventSourceRef.current.close()
+                eventSourceRef.current = null
             }
+
             if (reconnectTimeoutRef.current) {
                 clearTimeout(reconnectTimeoutRef.current)
+                reconnectTimeoutRef.current = null
             }
         }
-    }, [])
+    }, [logLevel, connectToLogStream])
 
     // Auto-scroll to the bottom when new logs arrive
     useEffect(() => {
@@ -190,6 +233,29 @@ export default function LogViewer() {
         connectToLogStream()
     }
 
+    // Handle log level change
+    const handleLogLevelChange = (event: SelectChangeEvent) => {
+        const newLevel = event.target.value as LogLevel
+        console.log(`Changing log level from ${logLevel} to ${newLevel}`)
+        setLogLevel(newLevel)
+    }
+
+    // Get color for log level
+    const getLogColor = (level: string): string => {
+        switch (level) {
+            case "INFO":
+                return "#00ff00" // Green
+            case "WARN":
+                return "#ffff00" // Yellow
+            case "ERROR":
+                return "#ff0000" // Red
+            case "SYSTEM":
+                return "#00bfff" // Light blue
+            default:
+                return "#ffffff" // White
+        }
+    }
+
     // Download logs as a text file
     const downloadLogs = () => {
         if (logs.length === 0) {
@@ -200,7 +266,7 @@ export default function LogViewer() {
 
         try {
             // Create a formatted string with all logs
-            const logText = logs.join("\n")
+            const logText = logs.map((log) => log.content).join("\n")
 
             // Create a blob with the log text
             const blob = new Blob([logText], { type: "text/plain" })
@@ -211,7 +277,7 @@ export default function LogViewer() {
             // Get current date and time for the filename
             const now = new Date()
             const dateStr = now.toISOString().replace(/[:.]/g, "-").replace("T", "_").split("Z")[0]
-            const filename = `minecraft_logs_${dateStr}.log`
+            const filename = `minecraft_logs_${dateStr}_${logLevel}.log`
 
             // Create a temporary anchor element to trigger the download
             const a = document.createElement("a")
@@ -270,21 +336,37 @@ export default function LogViewer() {
                         </Box>
                     </Box>
                     <Typography variant="subtitle1" color="text.secondary">
-                        Viewing filtered [Server thread/INFO] logs from the Minecraft server
+                        Viewing filtered logs from the Minecraft server
                     </Typography>
-                    <Typography
-                        variant="body2"
-                        color={
-                            connectionStatus.includes("Connected")
-                                ? "success.main"
-                                : connectionStatus.includes("Failed")
-                                    ? "error.main"
-                                    : "text.secondary"
-                        }
-                        sx={{ mt: 1 }}
-                    >
-                        Status: {connectionStatus}
-                    </Typography>
+                    <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mt: 2 }}>
+                        <Typography
+                            variant="body2"
+                            color={
+                                connectionStatus.includes("Connected")
+                                    ? "success.main"
+                                    : connectionStatus.includes("Failed")
+                                        ? "error.main"
+                                        : "text.secondary"
+                            }
+                        >
+                            Status: {connectionStatus}
+                        </Typography>
+                        <FormControl size="small" sx={{ minWidth: 120 }}>
+                            <InputLabel id="log-level-select-label">Log Level</InputLabel>
+                            <Select
+                                labelId="log-level-select-label"
+                                id="log-level-select"
+                                value={logLevel}
+                                label="Log Level"
+                                onChange={handleLogLevelChange}
+                            >
+                                <MenuItem value="INFO">INFO</MenuItem>
+                                <MenuItem value="WARN">WARN</MenuItem>
+                                <MenuItem value="ERROR">ERROR</MenuItem>
+                                <MenuItem value="ALL">ALL</MenuItem>
+                            </Select>
+                        </FormControl>
+                    </Box>
                 </Paper>
 
                 {notification.show && (
@@ -336,7 +418,6 @@ export default function LogViewer() {
                             height: "60vh",
                             overflowY: "auto",
                             bgcolor: "black",
-                            color: "#00ff00",
                             p: 2,
                             fontFamily: "monospace",
                             fontSize: "0.875rem",
@@ -345,7 +426,15 @@ export default function LogViewer() {
                         }}
                     >
                         {logs.length > 0 ? (
-                            logs.map((log, index) => <div key={index}>{log.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>) // making sure we escape unsafe log content
+                            logs.map((log, index) => (
+                                <div
+                                    key={`${index}-${log.level}-${log.content.substring(0, 20)}`}
+                                    style={{ color: getLogColor(log.level) }}
+                                    dangerouslySetInnerHTML={{
+                                        __html: log.content.replace(/</g, "&lt;").replace(/>/g, "&gt;"),
+                                    }}
+                                />
+                            ))
                         ) : !isLoading ? (
                             <Typography color="#888" sx={{ p: 2 }}>
                                 {error ? "No logs available due to an error." : "Waiting for log entries..."}
@@ -404,6 +493,8 @@ export default function LogViewer() {
                             }}
                         >
                             <div>Connection Status: {connectionStatus}</div>
+                            <div>Current Log Level: {logLevel}</div>
+                            <div>Connection ID: {connectionIdRef.current}</div>
                             <div>Logs Received: {logs.length}</div>
                             <div>Auto-scroll: {autoScroll ? "Enabled" : "Disabled"}</div>
                             <div>Error: {error || "None"}</div>
