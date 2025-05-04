@@ -73,13 +73,15 @@ export default function LogViewer() {
                     return
                 }
 
-                // Check if the data is a system message
+                // Show system messages AND add them to the logs
                 if (event.data.includes("Error") || event.data.includes("Waiting")) {
                     setNotification({
                         show: true,
                         message: event.data,
                         severity: event.data.includes("Error") ? "error" : "info",
                     })
+                
+                    setLogs((prevLogs) => [...prevLogs, event.data])
                     return
                 }
 
