@@ -50,7 +50,8 @@ export async function GET() {
           const stats = fs.statSync(LOG_FILE_PATH)
 
           // Get the current position for this client, or start at the end if it's a new connection
-          let position = clientPositions.get(clientId) || Math.max(0, stats.size - 50000) // Start with last ~50KB for new clients
+          // let position = clientPositions.get(clientId) || Math.max(0, stats.size - 50000) // Start with last ~50KB for new clients
+          let position = Math.max(0, stats.size - 50000) // Start with last ~50KB for new clients
 
           // Send initial data
           const initialChunk = await readNewChunk(position)
